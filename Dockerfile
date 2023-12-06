@@ -11,7 +11,7 @@ RUN rm /tmp/arm-gnu-toolchain.tar.xz
 ENV PATH="/usr/local/arm-gnu-toolchain-11.3.rel1-x86_64-arm-none-eabi/bin:${PATH}"
 
 # Install nrfutil
-RUN echo "deb http://ftp.dk.debian.org/debian bullseye main" >/etc/apt/sources.list
+RUN echo "deb http://ftp.us.debian.org/debian bullseye main" >/etc/apt/sources.list
 RUN apt-get update
 RUN apt-get install -y python2 python2-dev
 RUN wget "https://bootstrap.pypa.io/pip/2.7/get-pip.py" -O /tmp/get-pip.py
