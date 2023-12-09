@@ -39,5 +39,11 @@ nrfutil settings generate --family NRF52810 --application nrf52810_xxaa.hex --ap
 cp $WORKSPACE/nRF5_SDK_17.0.2_d674dde/components/softdevice/s112/hex/s112_nrf52_7.2.0_softdevice.hex $WORKSPACE/hex
 mergehex --merge bl_settings.hex secure_bootloader_moko.hex nrf52810_xxaa.hex s112_nrf52_7.2.0_softdevice.hex --output firmware.hex
 
+# debug
+ls -alh firmware.hex
+
 # Convert the HEX file to a BIN file
 arm-none-eabi-objcopy --input-target=ihex --output-target=binary firmware.hex $WORKSPACE/dist/firmware.bin
+
+# debug
+ls -alh $WORKSPACE/dist/firmware.bin
