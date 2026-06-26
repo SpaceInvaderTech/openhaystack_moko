@@ -42,8 +42,15 @@ mergehex --merge bl_settings.hex secure_bootloader_moko.hex nrf52810_xxaa.hex s1
 # debug
 ls -alh firmware.hex
 
-# Convert the HEX file to a BIN file
-arm-none-eabi-objcopy --input-target=ihex --output-target=binary firmware.hex $WORKSPACE/dist/firmware.bin
+# Convert the HEX file to a BIN file.
+# Crop to the nRF52810 flash region (0x00000000 - 0x00030000, 192 KB) and fill
+# gaps with 0xFF (erased flash value) so the binary preserves the correct
+# offsets. Without cropping, records in the FICR/UICR region (~0x10000000)
+# would cause a 256 MB padded binary.
+srec_cat firmware.hex -Intel \
+    -crop 0x00000000 0x00030000 \
+    -fill 0xFF 0x00000000 0x00030000 \
+    -o $WORKSPACE/dist/firmware.bin -Binary
 
 # debug
 ls -alh $WORKSPACE/dist/firmware.bin

@@ -2,7 +2,7 @@ FROM debian:bookworm-slim as build-env
 
 # Install OS packages
 RUN apt-get update
-RUN apt-get install -y git build-essential wget
+RUN apt-get install -y git build-essential wget srecord
 
 # https://github.com/micropython/micropython/issues/8685
 RUN wget --no-verbose "https://developer.arm.com/-/media/Files/downloads/gnu/11.3.rel1/binrel/arm-gnu-toolchain-11.3.rel1-x86_64-arm-none-eabi.tar.xz?rev=95edb5e17b9d43f28c74ce824f9c6f10&hash=D5ACE3A6F75F603551D7702E00ED7B29" -O /tmp/arm-gnu-toolchain.tar.xz
