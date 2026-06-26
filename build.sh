@@ -42,15 +42,22 @@ mergehex --merge bl_settings.hex secure_bootloader_moko.hex nrf52810_xxaa.hex s1
 # debug
 ls -alh firmware.hex
 
-# Convert the HEX file to a BIN file.
-# Crop to the nRF52810 flash region (0x00000000 - 0x00030000, 192 KB) and fill
-# gaps with 0xFF (erased flash value) so the binary preserves the correct
-# offsets. Without cropping, records in the FICR/UICR region (~0x10000000)
-# would cause a 256 MB padded binary.
-srec_cat firmware.hex -Intel \
-    -crop 0x00000000 0x00030000 \
-    -fill 0xFF 0x00000000 0x00030000 \
-    -o $WORKSPACE/dist/firmware.bin -Binary
+# Produce the DFU release artifact: the APPLICATION-ONLY binary.
+#
+# The backend's DFU pipeline (blu-transmogrifier) patches a per-device key into
+# this binary and packages it as a buttonless *application* DFU, so it expects
+# ONLY the application image (the same ~50 KB shape as the legacy
+# nrf52810_xxaa.bin) -- NOT the merged MBR+SoftDevice+bootloader+app image.
+#
+# nrf52810_xxaa.hex is the app-only build output (linked above the SoftDevice).
+# objcopy -O binary writes it starting at the app's first byte, so the file
+# begins with the application vector table. The app hex has no UICR/FICR record,
+# so the old 256 MB blow-up cannot happen here -- no crop/fill needed.
+arm-none-eabi-objcopy -I ihex -O binary nrf52810_xxaa.hex $WORKSPACE/dist/firmware.bin
+
+# Keep the full merged image (MBR + SoftDevice + bootloader + settings + app)
+# for first-time factory provisioning over SWD. Not used by the DFU pipeline.
+cp firmware.hex $WORKSPACE/dist/firmware.hex
 
 # debug
-ls -alh $WORKSPACE/dist/firmware.bin
+ls -alh $WORKSPACE/dist/firmware.bin $WORKSPACE/dist/firmware.hex
