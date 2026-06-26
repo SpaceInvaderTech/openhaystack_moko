@@ -56,3 +56,5 @@ apps/firmware/build/_build/
 apps/firmware/dfu_images/private.key
 # apps/firmware/dfu_images/public_key.c
 _build/
+
+.idea/
