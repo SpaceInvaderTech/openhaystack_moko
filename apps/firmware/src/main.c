@@ -18,6 +18,7 @@
 #include "nrf_bootloader_info.h"
 #include "nrf_pwr_mgmt.h"
 #include "nrf_sdh.h"
+#include "nrf_soc.h"
 
 #ifndef uint8_t
     typedef __uint8_t uint8_t;
@@ -128,6 +129,25 @@ static void log_init(void)
     NRF_LOG_DEFAULT_BACKENDS_INIT();
 }
 /**
+ * Generates a unique BLE random static address from the chip's hardware device ID.
+ * This ensures each unconfigured device is distinguishable on a BLE scanner.
+ */
+static void set_random_address_from_device_id(void) {
+    uint8_t addr[6];
+    uint32_t dev_id0 = NRF_FICR->DEVICEID[0];
+    uint32_t dev_id1 = NRF_FICR->DEVICEID[1];
+
+    addr[0] = (uint8_t)(dev_id0);
+    addr[1] = (uint8_t)(dev_id0 >> 8);
+    addr[2] = (uint8_t)(dev_id0 >> 16);
+    addr[3] = (uint8_t)(dev_id0 >> 24);
+    addr[4] = (uint8_t)(dev_id1);
+    addr[5] = (uint8_t)(dev_id1 >> 8) | 0xC0; // MSB two bits set = random static address
+
+    setMacAddress(addr);
+}
+
+/**
  * main function
  */
 int main(void) {
@@ -157,8 +177,20 @@ int main(void) {
     gap_params_init();
     gatt_init();
 
-    // Set bluetooth address
-    setMacAddress(ble_address);
+    // Check if the device is configured
+    bool configured = !(public_key[0] == 'O' &&
+                        public_key[1] == 'F' &&
+                        public_key[2] == 'F' &&
+                        public_key[3] == 'L' &&
+                        public_key[4] == 'I' &&
+                        public_key[5] == 'N' &&
+                        public_key[6] == 'E');
+
+    if (configured) {
+        setMacAddress(ble_address);
+    } else {
+        set_random_address_from_device_id();
+    }
 
     advertising_init(ADVERTISING_INTERVAL);
 
@@ -166,18 +198,9 @@ int main(void) {
     services_init();
     conn_params_init();
 
-    // Start timers if the device is configured
-    if (public_key[0] == 'O' &&
-        public_key[1] == 'F' &&
-        public_key[2] == 'F' &&
-        public_key[3] == 'L' &&
-        public_key[4] == 'I' &&
-        public_key[5] == 'N' &&
-        public_key[6] == 'E') {
-            // Leave unconfigured
-        } else {
-            timers_start();
-        }
+    if (configured) {
+        timers_start();
+    }
 
     // Start advertising
     startAdvertisement();
