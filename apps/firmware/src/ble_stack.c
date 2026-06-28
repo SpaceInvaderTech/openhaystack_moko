@@ -328,6 +328,22 @@ static void on_adv_evt(ble_adv_evt_t ble_adv_evt)
     }
 }
 
+/**@brief Function for stopping BLE advertising.
+ *
+ * @details Gracefully stops the current advertising set. Safe to call even if
+ *          advertising is already stopped (NRF_ERROR_INVALID_STATE is ignored).
+ */
+void stopAdvertisement(void)
+{
+    ret_code_t err_code;
+
+    err_code = sd_ble_gap_adv_stop(m_advertising.adv_handle);
+    if (err_code != NRF_SUCCESS && err_code != NRF_ERROR_INVALID_STATE)
+    {
+        APP_ERROR_CHECK(err_code);
+    }
+}
+
 /**@brief Function for initializing the Advertising functionality.
  */
 void advertising_init(int interval)

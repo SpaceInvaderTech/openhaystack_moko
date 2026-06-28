@@ -4,6 +4,7 @@
 #include <string.h>
 #include "ble_stack.h"
 #include "openhaystack.h"
+#include "accel.h"
 #include "app_timer.h"
 #include "nrf_log.h"
 #include "nrf_log_ctrl.h"
@@ -39,15 +40,39 @@
 
 /**
  * config mode timeout
- * 
+ *
  * This setting will specify for how long the device will remain on "config mode" before start
  * advertising the location beacon. Actually you can config the device on "advertising mode" but
  * on "config mode" it will broadcast its name.
  */
 #define CONFIG_MODE_TIMEOUT APP_TIMER_TICKS(60000L) // 60 seconds
 
-// Define the "config mode" timer
+/**
+ * Time without motion before switching to idle mode.
+ * After this period with no accelerometer interrupt, the device stops continuous
+ * advertising and switches to a periodic hourly burst to save power.
+ */
+#define IDLE_TIMEOUT APP_TIMER_TICKS(120000L) // 2 minutes
+
+/**
+ * Interval between advertising bursts when idle (1 hour).
+ * The SoftDevice max advertising interval is ~10s, so instead of continuous
+ * advertising at a long interval we fully stop and re-advertise periodically.
+ */
+#define IDLE_BEACON_INTERVAL APP_TIMER_TICKS(3600000L) // 1 hour
+
+/**
+ * Duration of an advertising burst when in idle mode.
+ * The device briefly advertises for this window so nearby Apple devices
+ * can pick up the beacon, then goes silent again.
+ */
+#define IDLE_BURST_DURATION APP_TIMER_TICKS(10000L) // 10 seconds
+
+// Define application timers
 APP_TIMER_DEF(config_mode_timer);
+APP_TIMER_DEF(idle_timer);
+APP_TIMER_DEF(idle_beacon_timer);
+APP_TIMER_DEF(idle_burst_timer);
 
 /**
  * This is the default public key. You can either modify this variable or patch the binary firmware
@@ -88,6 +113,92 @@ static void config_timer_handler(void * p_context)
     updateAdvertisementData(raw_data, data_len);
 }
 
+/**@brief Handler for the idle beacon timer (hourly wake-up).
+ *
+ * @details Starts a brief advertising burst so that nearby Apple devices can
+ *          receive the beacon even when the tracker is stationary.
+ */
+static void idle_beacon_timer_handler(void *p_context)
+{
+    ret_code_t err_code;
+
+    startAdvertisement();
+
+    err_code = app_timer_start(idle_burst_timer, IDLE_BURST_DURATION, NULL);
+    APP_ERROR_CHECK(err_code);
+}
+
+/**@brief Handler for the idle burst duration timer.
+ *
+ * @details Stops advertising after the burst window ends and re-arms the
+ *          hourly beacon timer for the next cycle.
+ */
+static void idle_burst_timer_handler(void *p_context)
+{
+    ret_code_t err_code;
+
+    stopAdvertisement();
+
+    err_code = app_timer_start(idle_beacon_timer, IDLE_BEACON_INTERVAL, NULL);
+    APP_ERROR_CHECK(err_code);
+}
+
+/**@brief Handler for the idle timeout timer.
+ *
+ * @details Called when no motion has been detected for IDLE_TIMEOUT.
+ *          Stops continuous advertising and starts the hourly beacon cycle
+ *          to conserve battery power.
+ */
+static void idle_timer_handler(void *p_context)
+{
+    ret_code_t err_code;
+
+    if (!m_is_idle)
+    {
+        m_is_idle = true;
+
+        stopAdvertisement();
+        accel_enter_low_power();
+
+        // Start the hourly beacon cycle
+        err_code = app_timer_start(idle_beacon_timer, IDLE_BEACON_INTERVAL, NULL);
+        APP_ERROR_CHECK(err_code);
+
+        NRF_LOG_INFO("Entering idle mode (hourly burst)");
+    }
+}
+
+/**@brief Callback invoked when the accelerometer detects motion.
+ *
+ * @details Called from GPIOTE interrupt context. Restarts the idle countdown
+ *          and, if the device was in idle mode, resumes continuous advertising.
+ */
+static void motion_handler(void)
+{
+    ret_code_t err_code;
+
+    // Restart idle countdown
+    err_code = app_timer_stop(idle_timer);
+    APP_ERROR_CHECK(err_code);
+
+    err_code = app_timer_start(idle_timer, IDLE_TIMEOUT, NULL);
+    APP_ERROR_CHECK(err_code);
+
+    if (m_is_idle)
+    {
+        m_is_idle = false;
+
+        // Cancel idle beacon cycle
+        app_timer_stop(idle_beacon_timer);
+        app_timer_stop(idle_burst_timer);
+
+        // Resume continuous advertising
+        startAdvertisement();
+
+        NRF_LOG_INFO("Motion detected, resuming active mode");
+    }
+}
+
 /**@brief Function for the Timer initialization.
  *
  * @details Initializes the timer module. This creates and starts application timers.
@@ -104,22 +215,41 @@ static void timers_init(void)
                                 config_timer_handler);
     APP_ERROR_CHECK(err_code);
 
+    err_code = app_timer_create(&idle_timer,
+                                APP_TIMER_MODE_SINGLE_SHOT,
+                                idle_timer_handler);
+    APP_ERROR_CHECK(err_code);
 
+    err_code = app_timer_create(&idle_beacon_timer,
+                                APP_TIMER_MODE_SINGLE_SHOT,
+                                idle_beacon_timer_handler);
+    APP_ERROR_CHECK(err_code);
+
+    err_code = app_timer_create(&idle_burst_timer,
+                                APP_TIMER_MODE_SINGLE_SHOT,
+                                idle_burst_timer_handler);
+    APP_ERROR_CHECK(err_code);
 }
 
-/**@brief Function to start the timers
- * 
+/**@brief Function to start the application timers.
+ *
+ * @details Starts the config mode timer (switches to beacon payload after timeout)
+ *          and the idle detection timer (enters low-power mode when no motion).
  */
 static void timers_start(void)
 {
-       ret_code_t err_code;
-       err_code = app_timer_start(config_mode_timer, 
-                                    CONFIG_MODE_TIMEOUT, 
-                                    NULL);
-       APP_ERROR_CHECK(err_code);
+    ret_code_t err_code;
+
+    err_code = app_timer_start(config_mode_timer,
+                               CONFIG_MODE_TIMEOUT,
+                               NULL);
+    APP_ERROR_CHECK(err_code);
+
+    err_code = app_timer_start(idle_timer, IDLE_TIMEOUT, NULL);
+    APP_ERROR_CHECK(err_code);
 }
 
-/**@brief Function for the Power manager.
+/**@brief Function for the log initialization.
  */
 static void log_init(void)
 {
@@ -128,11 +258,15 @@ static void log_init(void)
 
     NRF_LOG_DEFAULT_BACKENDS_INIT();
 }
-/**
- * Generates a unique BLE random static address from the chip's hardware device ID.
- * This ensures each unconfigured device is distinguishable on a BLE scanner.
+
+/**@brief Function to generate a unique BLE address from the chip's hardware ID.
+ *
+ * @details Uses NRF_FICR->DEVICEID registers to derive a random static address
+ *          that is unique per chip. This ensures each unconfigured device is
+ *          distinguishable on a BLE scanner.
  */
-static void set_random_address_from_device_id(void) {
+static void set_random_address_from_device_id(void)
+{
     uint8_t addr[6];
     uint32_t dev_id0 = NRF_FICR->DEVICEID[0];
     uint32_t dev_id1 = NRF_FICR->DEVICEID[1];
@@ -150,7 +284,8 @@ static void set_random_address_from_device_id(void) {
 /**
  * main function
  */
-int main(void) {
+int main(void)
+{
     // Init DFU
     // Initialize the async SVCI interface to bootloader before any interrupts are enabled.
     log_init();
@@ -200,6 +335,7 @@ int main(void) {
 
     if (configured) {
         timers_start();
+        accel_init(motion_handler);
     }
 
     // Start advertising

@@ -37,13 +37,20 @@ void setAdvertisementData(uint8_t *data, uint8_t dlen);
  */
 void updateAdvertisementData(uint8_t *data, uint8_t dlen);
 
-/**
- * Start advertising
+/**@brief Function for starting BLE advertising.
  */
 void startAdvertisement();
 
-/**
- * Initialize advertising with specified interval in msec
+/**@brief Function for stopping BLE advertising.
+ *
+ * @details Gracefully stops the current advertising set. Safe to call even if
+ *          advertising is already stopped.
+ */
+void stopAdvertisement(void);
+
+/**@brief Function for initializing the Advertising functionality.
+ *
+ * @param[in] interval  Advertising interval in milliseconds.
  */
 void advertising_init(int interval);
 
